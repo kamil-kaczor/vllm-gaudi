@@ -214,7 +214,7 @@ class HPUWorker(WorkerBase):
             f" {format_bytes(graph_headroom_bytes)} reserved for HPUGraphs "
             f"(VLLM_GRAPH_RESERVED_MEM={graph_reserved_mem}), "
             f"{format_bytes(dummy_block_headroom)} reserved for KV cache dummy "
-            f"block {format_bytes(cache_size_bytes-dummy_block_headroom)} "
+            f"block {format_bytes(cache_size_bytes - dummy_block_headroom)} "
             "reserved for usable KV cache")
 
         logger.info(msg)
@@ -256,8 +256,8 @@ class HPUWorker(WorkerBase):
         scheduler_output: "SchedulerOutput",
     ) -> ModelRunnerOutput:
         with track_graph_compile('HPUWorker.execute_model') \
-            if self.gc_track_recompiles \
-            else contextlib.nullcontext():
+                if self.gc_track_recompiles \
+                else contextlib.nullcontext():
             output = self.model_runner.execute_model(scheduler_output)
         # TODO(woosuk): Send the output to the engine process.
         return output if self.rank == 0 else None
