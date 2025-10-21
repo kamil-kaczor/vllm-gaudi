@@ -22,7 +22,7 @@ class LinearBucketingStrategy:
                                                        step=block_size,
                                                        max=max_model_len)
         max_ctx = math.ceil((max_model_len - prompt_query_bucket_cfg[0]) // block_size)
-        prompt_ctx_bucket_cfg = [0, 1, max_ctx]
+        prompt_ctx_bucket_cfg = read_bucket_settings('prompt', 'ctx', min=0, step=1, max=max_ctx)
 
         if use_merged_prefill:
             prev_prompt_bs_bucket_cfg = tuple(prompt_bs_bucket_cfg)
@@ -32,7 +32,11 @@ class LinearBucketingStrategy:
             prompt_bs_bucket_cfg = (1, 1, 1)
             query_min, query_step, _ = prev_prompt_query_bucket_cfg
             prompt_query_bucket_cfg = (query_min, query_step * 4, max_num_batched_tokens)
-            prompt_ctx_bucket_cfg = (0, 4, max_ctx * max_num_prefill_seqs)
+            prompt_ctx_bucket_cfg = read_bucket_settings('prompt',
+                                                         'ctx',
+                                                         min=0,
+                                                         step=4,
+                                                         max=max_ctx * max_num_prefill_seqs)
 
             msg = ('Merged prefill is enabled!\n'
                    'Overriding prompt bucketing settings!\n'
@@ -54,11 +58,12 @@ class LinearBucketingStrategy:
 
         decode_bs_bucket_cfg = read_bucket_settings('decode', 'bs', min=1, step=32, max=max_num_seqs)
         decode_query_bucket_cfg = [1, 1, 1]
-        decode_block_bucket_cfg = read_bucket_settings('decode',
-                                                       'block',
-                                                       min=block_size,
-                                                       step=block_size,
-                                                       max=max_blocks)
+        decode_block_bucket_cfg = read_bucket_settings('decode', 'block', min=1, step=block_size, max=max_blocks)
+        if decode_block_bucket_cfg[2] > max_blocks:
+            logger().info(
+                f'VLLM_DECODE_BLOCK_BUCKET_MAX={decode_block_bucket_cfg[2]} is higher than max_blocks={max_blocks}. Your configuration VLLM_DECODE_BLOCK_BUCKET_MAX={decode_block_bucket_cfg[2]} will be overwritten to VLLM_DECODE_BLOCK_BUCKET_MAX={max_blocks}'
+            )
+            decode_block_bucket_cfg[2] = max_blocks
 
         msg = ("Decode bucket config (min, step, max_warmup) "
                f"bs:{decode_bs_bucket_cfg}, "
@@ -104,11 +109,11 @@ def warmup_range(config: Tuple[int, int, int]):
     """
     bmin, bstep, bmax = config
     add_zero_bucket = bmin == 0
-    if add_zero_bucket:
-        bmin = bstep
     assert bmin <= bmax, ("Min. batch size cannot be greater than max. "
                           "batch size. If you want to skip warmup, "
                           "set VLLM_SKIP_WARMUP=true")
+    if add_zero_bucket:
+        bmin = bstep
     base = itertools.repeat(2)
     ramp_up_acc = itertools.accumulate(base, func=operator.mul, initial=bmin)
     ramp_up_tw = itertools.takewhile(lambda x: x < bstep and x <= bmax, \

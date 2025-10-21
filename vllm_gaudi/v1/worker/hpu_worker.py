@@ -20,7 +20,7 @@ from vllm.config import VllmConfig
 from vllm.distributed import (ensure_model_parallel_initialized, init_distributed_environment)
 from vllm.distributed.kv_transfer import ensure_kv_transfer_initialized
 from vllm.model_executor import set_random_seed
-from vllm.utils import STR_DTYPE_TO_TORCH_DTYPE
+from vllm.utils.torch_utils import STR_DTYPE_TO_TORCH_DTYPE
 from vllm.v1.kv_cache_interface import (FullAttentionSpec, KVCacheConfig, KVCacheSpec)
 from vllm.v1.outputs import (DraftTokenIds, AsyncModelRunnerOutput, ModelRunnerOutput)
 from vllm.v1.worker.utils import bind_kv_cache
@@ -129,6 +129,7 @@ class HPUWorker(WorkerBase):
         self.profiler.stop()
 
     def init_device(self):
+        self.device = torch.device("hpu")
         # Initialize the distributed environment.
         init_worker_distributed_environment(self.vllm_config, self.rank, self.distributed_init_method, self.local_rank)
         # Set random seed.
@@ -244,7 +245,7 @@ class HPUWorker(WorkerBase):
     def compile_or_warm_up_model(self) -> None:
         # Don't run the warmup if in eager or if the model is already warmed up
         if not self.model_config.enforce_eager \
-            and not self.model_runner.graphed_buckets:
+            and not getattr(self.model_runner, 'graphed_buckets', None):
             self.model_runner.warmup_model()
         # Reset the seed to ensure that the random state is not affected by
         # the model initialization and profiling.
@@ -272,7 +273,9 @@ class HPUWorker(WorkerBase):
                 self.step_profiler = None
                 raise RuntimeError('Step profiling finished!')
         self.step += 1
-        return output if self.rank == 0 else None
+        # NOTE(Harish): removed "if self.rank == 0 else None" for KV_connector enabling with TP>1
+        # referred to Gpu Model Runner, KV connector aggregation expects valid output from all ranks
+        return output
 
     def get_supported_tasks(self) -> tuple[SupportedTask, ...]:
         return self.model_runner.get_supported_tasks()
